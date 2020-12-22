@@ -1,0 +1,364 @@
+PARSER_BEGIN(Parser)
+package parser;
+import java.util.*;
+import AST.*;
+import compile.*;
+import exceptions.*;
+
+/** ID lister. */
+public class Parser
+{
+  /** Main entry point. */
+  public static void main(String args [])
+  {
+    Parser parser = new Parser(System.in);
+    ASTNode exp;
+    Environment evironment = new Environment(null);
+    while (true)
+    {
+      try
+      {
+        exp = parser.Start();
+        System.out.println(exp.eval(evironment));
+        CodeBlock block = new CodeBlock();
+        exp.compile(block, evironment);
+        block.write("Demo.j");
+      }
+      catch (Exception e)
+      {
+        System.out.println("Syntax error");
+        e.printStackTrace();
+        parser.ReInit(System.in);
+      }
+      
+    }
+  }
+}
+
+PARSER_END(Parser)
+
+SKIP :
+{
+  " "
+| "\t"
+| "\r"
+}
+
+TOKEN :
+{
+  < Num : ([ "0"-"9" ])+ >
+| 
+  < PLUS : "+" >
+| 
+  < MINUS : "-" >
+| 
+  < TIMES : "*" >
+| 
+  < DIV : "/" >
+|
+  < MOD : "%" >
+| 
+  < LPAR : "(" >
+| 
+  < RPAR : ")" >
+| 
+  < NOT : "~" >
+| 
+  < AND : "&&" >
+| 
+  < OR : "||" >
+| 
+  < TRUE : "true" >
+| 
+  < FALSE : "false" >
+| 
+  < SEMICOLON : ";" >
+| 
+  < EL : "\n" >
+| 
+  < DEF : "def" >
+| 
+  < EQUALS : "=" >
+| 
+  < EQUALTHEN : "==" >
+| 
+  < LESSTHEN : "<" >
+| 
+  < MORETHEN : ">" >
+| 
+  < LESSEQTHEN : "<=" >
+| 
+  < MOREEQTHEN : ">=" >
+| 
+  < IN : "in" >
+| 
+  < END : "end" >
+|
+  < WHILE : "while" >
+|
+  < DO : "do" >
+|
+  < IF : "if" >
+|
+  < THEN : "then" >
+|
+  < ELSE : "else" >
+| 
+  < NEW : "new" >
+| 
+  < REF : "!" >
+| 
+  < ASSIGN : ":=" >
+|
+  < PRINTLN : "println" >
+|
+  < PRINT : "print" >
+| 
+  < Id : [ "a"-"z", "A"-"Z" ] ([ "a"-"z", "A"-"Z", "0"-"9" ])* >
+}
+
+ASTNode Start() :
+{
+  ASTNode t;
+}
+{
+  //t = Exp() < EL >
+  t = Seq() < EL >
+  {
+    return t;
+  }
+}
+
+ASTNode Exp() :
+{
+  Token op;
+  ASTNode t1, t2;
+}
+{
+  t1 = Term()
+  (
+    (
+      op = < PLUS >
+    | op = < MINUS >
+    )
+    t2 = Term()
+    {
+      if (op.kind == PLUS) 
+      t1 = new ASTPlus(t1, t2);
+      else t1 = new ASTSub(t1, t2);
+    }
+  )*
+  {
+    return t1;
+  }
+}
+
+
+ASTNode Term() :
+{
+  Token op;
+  ASTNode t1, t2;
+}
+{
+  t1 = Fact()
+  (  op = < ASSIGN > 
+    t2 = Comp()
+    {
+      t1 = new ASTAssign(t1, t2);
+    }
+  | (
+   
+    (
+      op = < TIMES >
+    | op = < DIV >
+    | op = < MOD >
+    )
+    t2 = Fact()
+    {
+      if (op.kind == TIMES) 
+      t1 = new ASTMult(t1, t2);
+      else if (op.kind == DIV)
+      t1 = new ASTDiv(t1, t2);
+      else t1 = new ASTMod(t1,t2);
+    }
+  
+  )*
+)
+  {
+    return t1;
+  }
+}
+
+ASTNode Fact() :
+{	
+  Token n;
+  ArrayList < String > ids = new ArrayList < String > ();
+  ArrayList < ASTNode > nodes = new ArrayList < ASTNode > ();
+  ASTNode t = null, p, q = null;
+}
+{
+  (
+    n = < Num >
+    {
+      t = new ASTNum(Integer.parseInt(n.image));
+    }
+  | n = < Id >
+    {
+      t = new ASTId(n.image);
+    }
+  | < DEF >
+    (
+      n = < Id >
+      {
+        ids.add(n.image);
+      }
+     // < EQUALS > t = Exp()
+     < EQUALS > t = Seq()
+      {
+        nodes.add(t);
+      }
+    )+
+    
+   // < IN > p = Exp() < END >
+   < IN > p = Seq() < END >
+    {
+      t = new ASTDef(ids, nodes, p);
+    }
+  | < MINUS >
+    {
+      t = new ASTUminus(Fact());
+    }
+  | < NEW > t = Fact()
+  {
+    t = new ASTNew(t);
+  }
+  | < REF > t = Fact()
+    {
+      t = new ASTRef(t);
+    }
+   | < TRUE >
+    {
+      t = new ASTBool(true);
+    }
+  | < FALSE >
+    {
+      t = new ASTBool(false);
+    }
+  |< NOT > t = Fact()
+    {
+      t = new ASTNot(t);
+    }
+  | < WHILE > t = Seq() < DO > p = Seq() < END >
+    {
+      t = new ASTWhile(t, p);
+    }
+  | < IF > t = Seq() < THEN > p = Seq() (< ELSE > q = Seq())? < END >
+    {
+      t = new ASTIf(t, p, q);
+    }
+  | < PRINT > t = Exp()
+    {
+      t = new ASTPrint(t);
+    }
+   | < PRINTLN >  
+    {
+      t = new ASTPrintln();
+    }
+  | < LPAR > t = Seq() < RPAR >// < LPAR > t = Exp() < RPAR >
+  )
+  {
+    return t;
+  }
+}
+
+ASTNode Comp() :
+{
+  ASTNode t1, t2;
+  Token op;
+}
+{
+  t1 = Exp()
+  (
+    (
+      op = < LESSTHEN >
+    | op = < MORETHEN >
+    | op = < LESSEQTHEN >
+    | op = < MOREEQTHEN >
+    )
+    t2 = Exp()
+    {
+      t1 = new ASTComp(t1, t2, op.image);
+    }
+  )?
+  {
+    return t1;
+  }
+}
+
+ASTNode CompEquals() :
+{
+  ASTNode t1, t2;
+}
+{
+  t1 = Comp()
+  (
+    < EQUALTHEN > t2 = CompEquals()
+    {
+      t1 = new ASTComp(t1, t2, "==");
+    }
+  )*
+  {
+    return t1;
+  }
+}
+
+ASTNode And() :
+{
+  ASTNode t1, t2;
+}
+{
+  t1 = CompEquals()
+  (
+    < AND > t2 = And()
+    {
+      t1 = new ASTAnd(t1, t2);
+    }
+  )*
+  {
+    return t1;
+  }
+}
+
+ASTNode Or() :
+{
+  ASTNode t1, t2;
+}
+{
+  t1 = And()
+  (
+    < OR > t2 = Or()
+    {
+      t1 = new ASTOr(t1, t2);
+    }
+  )*
+  {
+    return t1;
+  }
+}
+
+ASTNode Seq() :
+{
+  ASTNode t1, t2;
+}
+{
+  t1 = Or()
+  (
+    < SEMICOLON > t2 = Seq()
+    {
+      t1 = new ASTSeq(t1, t2);
+    }
+  )*
+  {
+    return t1;
+  }
+}
